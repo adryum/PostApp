@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "height": 600,
+        "title": "postapp",
+        "width": 800
+      }
+    ]
+  },
+  "build": {
+    "beforeBuildCommand": "bun run build",
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../build"
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "targets": "all"
+  },
+  "identifier": "com.adrianskirsteins.postapp",
+  "plugins": {
+    "typegen": {
+      "excludePatterns": null,
+      "force": false,
+      "includePatterns": null,
+      "includePrivate": false,
+      "outputPath": "./src/generated",
+      "projectPath": "./src-tauri",
+      "typeMappings": null,
+      "validationLibrary": "none",
+      "verbose": false,
+      "visualizeDeps": false
+    }
+  },
+  "productName": "postapp",
+  "version": "0.1.0"
+}

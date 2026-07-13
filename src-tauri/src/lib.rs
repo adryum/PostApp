@@ -4,6 +4,7 @@ pub struct Request {
     url: String,
     // #[serde(rename = "type")] this is meta data for our obj, like in GO
     request_type: String,
+    accept_invalid_certs: bool,
     headers: Vec<(String, String)>,
     body: Vec<(String, String)>,
     body_type: String,             // "json" | "form" | "raw" | "multipart" | "none"
@@ -27,11 +28,17 @@ use std::time::Duration;
 
 #[tauri::command]
 async fn process_request(request: Request) -> Result<String, String> {
-    let client: reqwest::Client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(request.connection_timeout_ms.unwrap_or(10_000)))
-        .timeout(Duration::from_millis(request.timeout_ms.unwrap_or(30_000)))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(Duration::from_millis(
+            request.connection_timeout_ms.unwrap_or(10_000),
+        ))
+        .timeout(Duration::from_millis(request.timeout_ms.unwrap_or(30_000)));
+
+    if request.accept_invalid_certs {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+
+    let client = builder.build().map_err(|e| e.to_string())?;
 
     let mut req_builder = match request.request_type.to_uppercase().as_str() {
         "GET" => client.get(&request.url),
@@ -112,6 +119,7 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_libsql::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet, process_request])
         .run(tauri::generate_context!())

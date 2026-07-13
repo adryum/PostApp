@@ -90,7 +90,7 @@
     position: relative
     display: flex
 
-    width: 7rem
+    min-width: 7rem
 
     font-family: "Roboto Mono", monospace;
     letter-spacing: .06em

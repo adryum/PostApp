@@ -5,8 +5,9 @@
 	import IconButton from '../buttons/IconButton.svelte';
 	import IconTextButton from '../buttons/IconTextButton.svelte';
 	import { svgAdd, svgChevronDown, svgConvertor, svgTrash } from '$lib/assets/svgs';
+	import HMACField from '../input_fields/modifiers/HMACField.svelte';
 
-	let isExpanded = $state(false);
+	let isExpanded = $state(true);
 	let isDeleting = $state(false);
 	let deleteDuration = 300;
 
@@ -64,12 +65,13 @@
 				<div class="line-seperator"></div>
 				<input class="input" bind:value={row.key} placeholder="key..." type="text" />
 				<p class="seperator">:</p>
-				<input class="input" bind:value={row.value} placeholder="value..." type="text" />
+				<HMACField template={row.value} />
+				<!-- <input class="input" bind:value={row.value} placeholder="value..." type="text" /> -->
 				<IconButton
 					svg={svgConvertor}
 					iconSize="medium"
 					sizeRem="2.5rem"
-					style="color: var(--accent);"
+					style="color: var(--accent); margin-left: 0.5rem;"
 				/>
 				<IconButton
 					svg={svgTrash}
@@ -84,6 +86,11 @@
 {/if}
 
 <style lang="sass">
+.rows-list
+    display: flex
+    flex-direction: column
+    gap: 1px
+    margin: 1px
 .header
     background: var(--primary)
 
@@ -110,12 +117,10 @@
     padding: 0 .25rem 0 0
 
     width: 100%
-    height: 3rem
+    min-height: 3rem
 
     color: var(--semi-white)
     font-weight: 500
-
-    // border-bottom: 1px solid var(--black)
 
 .input
     background: none
@@ -123,7 +128,11 @@
 
     color: var(--semi-white)
     flex: 1
+    flex-basis: 0
     // height: 2.5rem
+    // max-width: 15rem
+    // width: 15rem
+    // min-width: 15rem
 
     padding: .5rem .5rem
     box-sizing: border-box
@@ -160,8 +169,9 @@
     align-items: center
     justify-content: center
 
-    aspect-ratio: 1 / 1
-    height: 100%
+    width: 2rem
+
+    height: 2rem
 
 .row-count
     display: flex

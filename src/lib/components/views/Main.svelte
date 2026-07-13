@@ -6,6 +6,15 @@
 	import { svgAdd, svgSave, svgShipSend, svgTrash } from '$lib/assets/svgs';
 	import IconButton from '../buttons/IconButton.svelte';
 	import { processRequest } from '../../../generated';
+	import { getHeaderFields, overwriteHeaderFields } from '$lib/db/queries/header_fields';
+	import { onMount } from 'svelte';
+	import {
+		getRequest,
+		insertOrUpdateRequest,
+		type PostRequestModel
+	} from '$lib/db/queries/requests';
+	import { getBodyFields, overwriteBodyFields } from '$lib/db/queries/body_fields';
+	import Toggle from '../input_fields/Toggle.svelte';
 
 	interface SendReadyRequest {
 		url: string;
@@ -14,6 +23,7 @@
 		body: [string, string][];
 		body_type: 'json' | 'form' | 'raw' | 'multipart' | 'none';
 		raw_body: string | undefined; // used when body_type == "raw"
+		accept_invalid_certs: boolean;
 		files: FileField[];
 		connection_timeout_ms?: number | undefined;
 		timeout_ms?: number | undefined;
@@ -50,17 +60,20 @@
 		}
 	];
 
-	let url = $state('https://10.200.70.254:8080/webhook/comp/project');
+	let url = $state('');
 	let typeValue = $state('0');
 	let selectedOption = $derived(typeOptions.find((opt) => opt.value === typeValue));
 	let headers: { id: string; key: string; value: string }[] = $state([]);
 	let body: { id: string; key: string; value: string }[] = $state([]);
 	let requestResult = $state('');
+	let acceptInvalidCerts = $state(false);
+
+	let request = $state<PostRequestModel | null>(null);
 
 	let isSending = $state(false);
 
 	let tabs = ['Content', 'Options'];
-	let currentTab = $state(tabs[0]);
+	let currentTab = $state(tabs[1]);
 
 	function selectTab(tab: string) {
 		currentTab = tab;
@@ -92,7 +105,8 @@
 			raw_body: undefined,
 			files: [],
 			connection_timeout_ms: 5 * 1000,
-			timeout_ms: undefined
+			timeout_ms: undefined,
+			accept_invalid_certs: false
 		};
 	}
 
@@ -105,6 +119,71 @@
 			return String(error);
 		}
 	}
+
+	async function load(requestId: string) {
+		request = await getRequest(requestId);
+		const headerFields = await getHeaderFields(requestId);
+		headers = headerFields.map((hf) => ({
+			id: hf.id,
+			key: hf.key,
+			value: hf.value
+		}));
+		const bodyFields = await getBodyFields(requestId);
+		body = bodyFields.map((bf) => ({
+			id: bf.id,
+			key: bf.key,
+			value: bf.value
+		}));
+		url = request?.url || '';
+		typeValue = typeOptions.find((opt) => opt.label === request?.method)?.value || '0';
+		acceptInvalidCerts = request?.acceptInvalidCerts === 1;
+	}
+
+	async function save() {
+		const requestId = request?.id || 'default-request-id';
+
+		await insertOrUpdateRequest({
+			id: requestId,
+			name: 'test-request',
+			createdAt: new Date().getTime(),
+			repositoryId: request?.repositoryId || '',
+			url: url,
+			method: selectedOption?.label || 'UNKNOWN',
+			updatedAt: new Date().getTime(),
+			acceptInvalidCerts: acceptInvalidCerts ? 1 : 0
+			// bodyType?: string | undefined;
+			// rawBody?: string | null | undefined;
+			// timeoutMs?: number | null | undefined;
+			// connectionTimeoutMs?: number | null | undefined;
+			// sortOrder?: number | undefined;
+		});
+		await overwriteHeaderFields(
+			requestId,
+			headers.map((h) => ({
+				id: h.id || crypto.randomUUID(),
+				requestId: requestId,
+				key: h.key,
+				value: h.value,
+				sortOrder: headers.indexOf(h)
+			}))
+		);
+		await overwriteBodyFields(
+			requestId,
+			body.map((b) => ({
+				id: b.id || crypto.randomUUID(),
+				requestId: requestId,
+				key: b.key,
+				value: b.value,
+				sortOrder: body.indexOf(b)
+			}))
+		);
+		console.log('saved');
+	}
+
+	onMount(async () => {
+		request = await getRequest('default-request-id');
+		console.log(request);
+	});
 </script>
 
 <div class="container">
@@ -124,7 +203,13 @@
 	<div class="header">
 		<Select bind:value={typeValue} color={selectedOption?.style.color} options={typeOptions} />
 		<input class="input" bind:value={url} placeholder="URL..." type="text" name="" id="" />
-		<IconTextButton label="Save" svg={svgSave} swapIcons={true} />
+		<IconTextButton label="Save" svg={svgSave} swapIcons={true} onclick={save} />
+		<IconTextButton
+			label="Load"
+			svg={svgSave}
+			swapIcons={true}
+			onclick={() => load(request?.id || 'default-request-id')}
+		/>
 		<IconTextButton
 			label="Send"
 			svg={svgShipSend}
@@ -137,14 +222,21 @@
 	<div class="main">
 		<div id="this" class="tabs">
 			{#each tabs as tab (tab)}
-				<button class="tab" class:selected={currentTab === tab} onclick={() => selectTab(tab)}
-					>{tab}</button
-				>
+				<button class="tab" class:selected={currentTab === tab} onclick={() => selectTab(tab)}>
+					{tab}
+				</button>
 			{/each}
 			<!-- <div class="tab-filler"></div> -->
 		</div>
-		<KeyValueList label="Headers" bind:rows={headers} />
-		<KeyValueList label="Body" bind:rows={body} />
+		{#if currentTab === 'Options'}
+			<div class="options-list">
+				<Toggle bind:checked={acceptInvalidCerts} label="Accept Invalid Certificates" />
+			</div>
+		{/if}
+		{#if currentTab === 'Content'}
+			<KeyValueList label="Headers" bind:rows={headers} />
+			<KeyValueList label="Body" bind:rows={body} />
+		{/if}
 	</div>
 
 	<div class="output">
@@ -155,6 +247,15 @@
 </div>
 
 <style lang="scss">
+	.options-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+
+		border-top: 1px solid var(--primary);
+
+		// padding: 0.5rem 1rem;
+	}
 	.tabs {
 		display: flex;
 
@@ -262,9 +363,6 @@
 	.side {
 		grid-area: side;
 	}
-	// .top
-	//     grid-area: top
-
 	.main {
 		grid-area: main;
 

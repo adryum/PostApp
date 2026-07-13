@@ -154,3 +154,16 @@ export const svgPlainLoader = `<svg xmlns="http://www.w3.org/2000/svg"
   </circle>
 
 </svg>`
+
+export const svgCheck = `<svg xmlns="http://www.w3.org/2000/svg"
+     width="20"
+     height="20"
+     viewBox="0 0 20 20"
+     fill="none">
+  <path
+    d="M4.5 10L8.2 13.8L15.5 6.5"
+    stroke="currentColor"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+</svg>`

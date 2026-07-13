@@ -17,7 +17,9 @@
 	"license": "MIT",
 	"dependencies": {
 		"@tauri-apps/api": "^2",
-		"@tauri-apps/plugin-opener": "^2"
+		"@tauri-apps/plugin-opener": "^2",
+		"drizzle-orm": "^0.45.2",
+		"tauri-plugin-libsql-api": "^0.1.1"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
@@ -26,6 +28,7 @@
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",
 		"@tauri-apps/cli": "^2",
 		"@types/node": "^24",
+		"drizzle-kit": "^0.31.10",
 		"eslint": "^10.4.1",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.19.0",

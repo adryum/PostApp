@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { svgChevronDown } from '$lib/assets/svgs';
-	import Icon from './Icon.svelte';
+	import { svgChevronDown, svgTrash } from '$lib/assets/svgs';
+	import IconButton from '$lib/components/buttons/IconButton.svelte';
 
 	interface Option {
 		value: string;
@@ -14,30 +14,38 @@
 	interface Props {
 		options: Option[];
 		value?: string;
-		placeholder?: string;
 		color?: string;
+		hint?: string;
 	}
 
 	let {
 		options,
+		hint = '...',
 		value = $bindable(''),
-		color = $bindable('var(--semi-white)'),
-		placeholder = 'Select an option'
+		color = $bindable('var(--semi-white)')
 	}: Props = $props();
 
 	let isOpen = $state(false);
 	let containerEl: HTMLDivElement;
 
-	const selectedLabel = $derived(options.find((o) => o.value === value)?.label ?? placeholder);
+	let selection = $state('');
+
+	// const selectedLabel = $derived(options.find((o) => o.value === value)?.label ?? placeholder);
 
 	function toggleOpen() {
 		isOpen = !isOpen;
 	}
 
-	function selectOption(opt: Option) {
+	export function selectOption(opt: Option) {
 		value = opt.value;
+		selection = opt.label;
 		isOpen = false;
 		color = opt.style.color;
+	}
+
+	function clearSelection() {
+		value = '';
+		selection = '';
 	}
 
 	function handleWindowClick(e: MouseEvent) {
@@ -54,18 +62,20 @@
 <svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <div class="container" bind:this={containerEl}>
-	<button
-		class="head"
-		type="button"
-		class:open={isOpen}
-		style="color: {color}"
-		aria-haspopup="listbox"
-		aria-expanded={isOpen}
-		onclick={toggleOpen}
-	>
-		{selectedLabel}
-		<Icon svg={svgChevronDown} size="small" style={isOpen ? 'transform: rotate(180deg);' : ''} />
-	</button>
+	<div class="head">
+		{#if selection}
+			<input class:open={isOpen} style="color: {color}" value={selection} readonly />
+		{:else}
+			<input class:open={isOpen} style="color: {color}" bind:value placeholder={hint} />
+		{/if}
+		<IconButton
+			svg={selection ? svgTrash : svgChevronDown}
+			iconSize="small"
+			iconStyle={isOpen ? 'transform: rotate(180deg);' : ''}
+			style={selection ? `background-color: var(--primary);` : ''}
+			onclick={() => (selection ? clearSelection() : toggleOpen())}
+		/>
+	</div>
 
 	{#if isOpen}
 		<div class="list" role="listbox">
@@ -98,16 +108,14 @@
 .head
     position: relative;
     display: flex;
-    justify-content: space-between;
 
-    background: var(--secondary)
     width: 100%;
     box-sizing: border-box;
     text-align: left;
 
     color: var(--semi-white);
+    background: var(--secondary)
 
-    padding: .5rem .5rem .5rem  1rem;
     border: 1px solid transparent;
     // border-color: transparent transparent rgba(0, 0, 0, 0.1) transparent;
     cursor: pointer;
@@ -117,6 +125,21 @@
     font-family: inherit;
     letter-spacing: inherit;
     line-height: 1rem;
+
+    input 
+        border: none
+        appearance: none
+        outline: none
+        width: 0
+        flex: 1
+        padding: .5rem .5rem .5rem  1rem;
+        background: transparent
+
+        font-family: inherit;
+        letter-spacing: inherit;
+        line-height: 1rem;
+
+
 
     &.open
         border-radius: 2px 2px 0 0;

@@ -7,8 +7,10 @@ export type PostRequestModel = typeof schema.requests.$inferInsert
 const columns = getTableColumns(schema.requests);
 
 const set = Object.keys(columns).reduce((acc, key) => {
-  acc[key as keyof typeof columns] = sql`excluded.${sql.raw(columns[key as keyof typeof columns].name)}`;
-  return acc;
+    if (columns[key as keyof typeof columns].name !== 'id') {
+        acc[key as keyof typeof columns] = sql`excluded.${sql.raw(columns[key as keyof typeof columns].name)}`;
+    }
+    return acc;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }, {} as any);
 

@@ -3,7 +3,7 @@
 pub struct Request {
     url: String,
     // #[serde(rename = "type")] this is meta data for our obj, like in GO
-    request_type: String,
+    method: String,
     accept_invalid_certs: bool,
     headers: Vec<(String, String)>,
     body: Vec<(String, String)>,
@@ -40,7 +40,7 @@ async fn process_request(request: Request) -> Result<String, String> {
 
     let client = builder.build().map_err(|e| e.to_string())?;
 
-    let mut req_builder = match request.request_type.to_uppercase().as_str() {
+    let mut req_builder = match request.method.to_uppercase().as_str() {
         "GET" => client.get(&request.url),
         "POST" => client.post(&request.url),
         "PUT" => client.put(&request.url),

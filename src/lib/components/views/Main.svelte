@@ -1,6 +1,16 @@
+<script module lang="ts">
+	export interface Request {
+		url: string;
+		method: string;
+		headers: [string, string][];
+		body: [string, string][];
+		acceptInvalidCerts: boolean;
+	}
+</script>
+
 <script lang="ts">
 	import SideNavbar from '../navigation/SideNavbar.svelte';
-	import Select from '../Select.svelte';
+	import Select from '../input_fields/dropdowns/Select.svelte';
 	import KeyValueList from '../lists/KeyValueList.svelte';
 	import IconTextButton from '../buttons/IconTextButton.svelte';
 	import { svgAdd, svgSave, svgShipSend, svgTrash } from '$lib/assets/svgs';
@@ -8,33 +18,26 @@
 	import { processRequest } from '../../../generated';
 	import { getHeaderFields, overwriteHeaderFields } from '$lib/db/queries/header_fields';
 	import { onMount } from 'svelte';
-	import {
-		getRequest,
-		insertOrUpdateRequest,
-		type PostRequestModel
-	} from '$lib/db/queries/requests';
+	import { getRequest, insertOrUpdateRequest } from '$lib/db/queries/requests';
 	import { getBodyFields, overwriteBodyFields } from '$lib/db/queries/body_fields';
 	import Toggle from '../input_fields/Toggle.svelte';
+	import { resolveTemplate, type ResolverOptions } from '$lib/parsers/resolver';
+	import type { VariableContext } from '$lib/parsers/modifiers';
+	import { getRepositories } from '$lib/db/queries/repositories';
 
-	interface SendReadyRequest {
-		url: string;
-		request_type: string;
-		headers: [string, string][];
-		body: [string, string][];
-		body_type: 'json' | 'form' | 'raw' | 'multipart' | 'none';
-		raw_body: string | undefined; // used when body_type == "raw"
-		accept_invalid_certs: boolean;
-		files: FileField[];
-		connection_timeout_ms?: number | undefined;
-		timeout_ms?: number | undefined;
+	interface Page {
+		id: string;
+		repositoryId: string;
+		name: string;
+		isSending: boolean;
 	}
 
-	interface FileField {
-		field_name: string;
-		file_name: string;
-		mime_type: string;
-		// base64-encoded bytes from the frontend, since JSON can't carry raw binary
-		data_base64: string;
+	interface RawRequest {
+		url: string;
+		method: string;
+		headers: { id: string; key: string; valueTemplate: string }[];
+		body: { id: string; key: string; valueTemplate: string }[];
+		acceptInvalidCerts: boolean;
 	}
 
 	let typeOptions = [
@@ -60,97 +63,216 @@
 		}
 	];
 
-	let url = $state('');
-	let typeValue = $state('0');
-	let selectedOption = $derived(typeOptions.find((opt) => opt.value === typeValue));
-	let headers: { id: string; key: string; value: string }[] = $state([]);
-	let body: { id: string; key: string; value: string }[] = $state([]);
-	let requestResult = $state('');
-	let acceptInvalidCerts = $state(false);
+	let rawRequest = $state<RawRequest>({
+		url: '',
+		method: '',
+		headers: [],
+		body: [],
+		acceptInvalidCerts: false
+	});
 
-	let request = $state<PostRequestModel | null>(null);
+	let page = $state<Page>({
+		id: 'default-request-id',
+		repositoryId: 'default-repo-id',
+		name: 'test-request',
+		isSending: false
+	});
 
-	let isSending = $state(false);
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let sentToRust = $state<any>({});
+
+	let resolvedRequest1 = $state<Request | null>(null);
+	let response = $state('');
 
 	let tabs = ['Content', 'Options'];
-	let currentTab = $state(tabs[1]);
+	let outputTabs = ['Response', 'Raw request', 'Resolved request', 'Second Resolved Request'];
+	let currentTab = $state(tabs[0]);
+	let currentOutputTab = $state(outputTabs[1]);
+	let methodValue = $state('0');
+	let methodOption = $derived(typeOptions.find((opt) => opt.value === methodValue));
+
+	let outputContent = $derived.by(() => {
+		switch (currentOutputTab) {
+			case outputTabs[0]:
+				return JSON.stringify(response, null, 2).trim();
+			case outputTabs[1]:
+				return JSON.stringify(rawRequest, null, 2).trim();
+			case outputTabs[2]:
+				return JSON.stringify(sentToRust, null, 2);
+			default:
+				return JSON.stringify(resolvedRequest1, null, 2);
+		}
+	});
+
+	$effect(() => {
+		rawRequest.method = methodOption?.label || '';
+	});
+
+	$effect(() => {
+		if (rawRequest) {
+			resolveRequest(formatToRequest(rawRequest)).then((req) => {
+				resolvedRequest1 = req;
+			});
+		}
+	});
+
+	function formatToRequest(rawRequest: RawRequest): Request {
+		return {
+			url: rawRequest.url,
+			method: rawRequest.method,
+			headers: rawRequest.headers.map((hf) => [hf.key, hf.valueTemplate]),
+			body: rawRequest.body.map((bf) => [bf.key, bf.valueTemplate]),
+			acceptInvalidCerts: rawRequest.acceptInvalidCerts
+		};
+	}
+
+	async function resolveRequest(request: Request): Promise<Request> {
+		const ctx: VariableContext = {
+			environment: {
+				baseUrl: 'https://api.example.com',
+				mySecretVar: 'abc123xyz',
+				authToken: 'Bearer eyJ...'
+			},
+			getters: {
+				now: () => new Date().toISOString()
+			},
+			resolvedLowerOrderRequest: undefined
+		};
+
+		const options: ResolverOptions = {
+			skipHigherOrder: true
+		};
+
+		const resolvedRequest: Request = {
+			url: '',
+			method: '',
+			headers: [],
+			body: [],
+			acceptInvalidCerts: false
+		};
+
+		resolvedRequest.url = await resolveTemplate(request.url, ctx, options);
+		resolvedRequest.method = request.method;
+		resolvedRequest.acceptInvalidCerts = request.acceptInvalidCerts;
+
+		for (const [key, value] of request.headers) {
+			resolvedRequest.headers.push([
+				await resolveTemplate(key, ctx, options),
+				await resolveTemplate(value, ctx, options)
+			]);
+		}
+
+		for (const [key, value] of request.body) {
+			resolvedRequest.body.push([
+				await resolveTemplate(key, ctx, options),
+				await resolveTemplate(value, ctx, options)
+			]);
+		}
+
+		if (options.containsHigherOrder) {
+			options.skipHigherOrder = false;
+			ctx.resolvedLowerOrderRequest = JSON.stringify(resolvedRequest);
+
+			resolvedRequest.url = await resolveTemplate(resolvedRequest.url, ctx, options);
+
+			const headerSnapshot = [...resolvedRequest.headers];
+			resolvedRequest.headers = [];
+			for (const [key, value] of headerSnapshot) {
+				resolvedRequest.headers.push([
+					await resolveTemplate(key, ctx, options),
+					await resolveTemplate(value, ctx, options)
+				]);
+			}
+
+			const bodySnapshot = [...resolvedRequest.body];
+			resolvedRequest.body = [];
+			for (const [key, value] of bodySnapshot) {
+				resolvedRequest.body.push([
+					await resolveTemplate(key, ctx, options),
+					await resolveTemplate(value, ctx, options)
+				]);
+			}
+		}
+
+		return resolvedRequest;
+	}
 
 	function selectTab(tab: string) {
 		currentTab = tab;
 	}
 
-	async function onSend() {
-		isSending = true;
-		let result = await sendRequest(prepeareForSending());
-		console.log(JSON.stringify(result, null, 4));
-		requestResult = result || 'Null was returned';
-		isSending = false;
-	}
-
-	function prepeareForSending(): SendReadyRequest {
-		if (!url || !selectedOption) {
-			throw new Error('Invalid request parameters');
-		}
-
-		return {
-			url: url.trim(),
-			request_type: selectedOption.label.trim(),
-			headers: headers
-				.filter((h) => !!h.key.trim() && !!h.value.trim())
-				.map((h) => [h.key.trim(), h.value.trim()]),
-			body: body
-				.filter((b) => !!b.key.trim() && !!b.value.trim())
-				.map((b) => [b.key.trim(), b.value.trim()]),
-			body_type: 'json',
-			raw_body: undefined,
-			files: [],
-			connection_timeout_ms: 5 * 1000,
-			timeout_ms: undefined,
-			accept_invalid_certs: false
-		};
-	}
-
-	async function sendRequest(request: SendReadyRequest): Promise<string> {
+	async function send() {
+		page.isSending = true;
 		try {
-			const result = await processRequest({ request });
-			return result;
+			const resolvedRequest = await resolveRequest(formatToRequest(rawRequest));
+			const payloadObj = Object.fromEntries(resolvedRequest.body);
+			const payload = JSON.stringify(payloadObj);
+			sentToRust = {
+				url: resolvedRequest.url,
+				method: resolvedRequest.method,
+				accept_invalid_certs: resolvedRequest.acceptInvalidCerts,
+				headers: resolvedRequest.headers,
+				body: resolvedRequest.body,
+				body_type: 'raw',
+				raw_body: payload,
+				files: [],
+				connection_timeout_ms: null,
+				timeout_ms: null
+			};
+			response = await processRequest({
+				request: sentToRust
+			});
+
+			console.log(JSON.stringify(response, null, 4));
 		} catch (error) {
+			response = String(error);
 			console.error('Request failed front:', error);
-			return String(error);
+		} finally {
+			page.isSending = false;
 		}
 	}
 
 	async function load(requestId: string) {
-		request = await getRequest(requestId);
+		const request = await getRequest(requestId);
 		const headerFields = await getHeaderFields(requestId);
-		headers = headerFields.map((hf) => ({
-			id: hf.id,
-			key: hf.key,
-			value: hf.value
-		}));
 		const bodyFields = await getBodyFields(requestId);
-		body = bodyFields.map((bf) => ({
-			id: bf.id,
-			key: bf.key,
-			value: bf.value
-		}));
-		url = request?.url || '';
-		typeValue = typeOptions.find((opt) => opt.label === request?.method)?.value || '0';
-		acceptInvalidCerts = request?.acceptInvalidCerts === 1;
+
+		methodValue = typeOptions.find((opt) => opt.label === request?.method)?.value || '0';
+		rawRequest = {
+			url: request?.url || '',
+			method: request?.method || '',
+			headers: headerFields.map((hf) => ({
+				id: hf.id,
+				key: hf.key,
+				valueTemplate: hf.value
+			})),
+			body: bodyFields.map((bf) => ({
+				id: bf.id,
+				key: bf.key,
+				valueTemplate: bf.value
+			})),
+			acceptInvalidCerts: request?.acceptInvalidCerts === 1
+		};
+
+		// console.log(rawRequest);
 	}
 
 	async function save() {
-		const requestId = request?.id || 'default-request-id';
+		page.id ??= 'default-request-id';
+
+		console.log('reps: ');
+
+		console.log(await getRepositories());
 
 		await insertOrUpdateRequest({
-			id: requestId,
-			name: 'test-request',
+			id: page.id,
+			name: page.name,
 			createdAt: new Date().getTime(),
-			repositoryId: request?.repositoryId || '',
-			url: url,
-			method: selectedOption?.label || 'UNKNOWN',
+			repositoryId: page.repositoryId,
+			url: rawRequest.url,
+			method: rawRequest.method,
 			updatedAt: new Date().getTime(),
-			acceptInvalidCerts: acceptInvalidCerts ? 1 : 0
+			acceptInvalidCerts: rawRequest.acceptInvalidCerts ? 1 : 0
 			// bodyType?: string | undefined;
 			// rawBody?: string | null | undefined;
 			// timeoutMs?: number | null | undefined;
@@ -158,31 +280,30 @@
 			// sortOrder?: number | undefined;
 		});
 		await overwriteHeaderFields(
-			requestId,
-			headers.map((h) => ({
+			page.id,
+			rawRequest.headers.map((h) => ({
 				id: h.id || crypto.randomUUID(),
-				requestId: requestId,
+				requestId: page.id,
 				key: h.key,
-				value: h.value,
-				sortOrder: headers.indexOf(h)
+				value: h.valueTemplate,
+				sortOrder: rawRequest.headers.indexOf(h)
 			}))
 		);
 		await overwriteBodyFields(
-			requestId,
-			body.map((b) => ({
+			page.id,
+			rawRequest.body.map((b) => ({
 				id: b.id || crypto.randomUUID(),
-				requestId: requestId,
+				requestId: page.id,
 				key: b.key,
-				value: b.value,
-				sortOrder: body.indexOf(b)
+				value: b.valueTemplate,
+				sortOrder: rawRequest.body.indexOf(b)
 			}))
 		);
 		console.log('saved');
 	}
 
 	onMount(async () => {
-		request = await getRequest('default-request-id');
-		console.log(request);
+		load(page.id);
 	});
 </script>
 
@@ -201,22 +322,29 @@
 		<IconButton iconSize="small" svg={svgAdd} />
 	</div>
 	<div class="header">
-		<Select bind:value={typeValue} color={selectedOption?.style.color} options={typeOptions} />
-		<input class="input" bind:value={url} placeholder="URL..." type="text" name="" id="" />
+		<Select bind:value={methodValue} color={methodOption?.style.color} options={typeOptions} />
+		<input
+			class="input"
+			bind:value={rawRequest.url}
+			placeholder="URL..."
+			type="text"
+			name=""
+			id=""
+		/>
 		<IconTextButton label="Save" svg={svgSave} swapIcons={true} onclick={save} />
 		<IconTextButton
 			label="Load"
 			svg={svgSave}
 			swapIcons={true}
-			onclick={() => load(request?.id || 'default-request-id')}
+			onclick={() => load(page?.id || 'default-request-id')}
 		/>
 		<IconTextButton
 			label="Send"
 			svg={svgShipSend}
-			isLoading={isSending}
+			isLoading={page.isSending}
 			swapIcons={true}
 			important={true}
-			onclick={onSend}
+			onclick={send}
 		/>
 	</div>
 	<div class="main">
@@ -230,37 +358,85 @@
 		</div>
 		{#if currentTab === 'Options'}
 			<div class="options-list">
-				<Toggle bind:checked={acceptInvalidCerts} label="Accept Invalid Certificates" />
+				<Toggle bind:checked={rawRequest.acceptInvalidCerts} label="Accept Invalid Certificates" />
 			</div>
 		{/if}
 		{#if currentTab === 'Content'}
-			<KeyValueList label="Headers" bind:rows={headers} />
-			<KeyValueList label="Body" bind:rows={body} />
+			<KeyValueList label="Headers" bind:rows={rawRequest.headers} />
+			<KeyValueList label="Body" bind:rows={rawRequest.body} />
 		{/if}
 	</div>
 
 	<div class="output">
-		{#if requestResult}
-			<pre class="pre"><code class="code">{requestResult}</code></pre>
-		{/if}
+		<ol class="output-list">
+			{#each outputTabs as tab (tab)}
+				<button
+					class="output-tab"
+					class:selected={currentOutputTab === tab}
+					onclick={() => (currentOutputTab = tab)}
+				>
+					{tab}
+				</button>
+			{/each}
+		</ol>
+		<pre class="pre"><code class="code">{outputContent}</code></pre>
 	</div>
 </div>
 
 <style lang="scss">
+	.output-list {
+		margin: 0;
+		padding: 0;
+		display: flex;
+		gap: 1px;
+		height: 2rem;
+
+		background: var(--secondary);
+		border: 1px solid transparent;
+		// border-top: 1px solid var(--secondary);
+	}
+	.output-tab {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: transparent;
+		color: var(--semi-white);
+		cursor: pointer;
+		box-sizing: border-box;
+		transition: 0.15s;
+
+		font-family: 'Roboto Mono', monospace;
+		font-size: 12px;
+		letter-spacing: 0.02em;
+
+		flex: 1;
+
+		border: 1px solid transparent;
+
+		&:hover {
+			backdrop-filter: brightness(1.2);
+		}
+
+		&.selected {
+			background-color: var(--primary);
+		}
+	}
 	.options-list {
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
-
 		border-top: 1px solid var(--primary);
 
 		// padding: 0.5rem 1rem;
 	}
 	.tabs {
 		display: flex;
+		gap: 1px;
 
 		height: 2rem;
-		background-color: var(--secondary);
+		border: 1px solid transparent;
+		border-left: 0;
+		// border-right: 1px solid var(--primary);
 
 		.tab {
 			display: flex;
@@ -277,9 +453,7 @@
 			letter-spacing: 0.02em;
 
 			flex: 1;
-
 			border: 1px solid transparent;
-			border-bottom: 1px solid var(--secondary);
 
 			&:hover {
 				backdrop-filter: brightness(1.2);
@@ -288,11 +462,6 @@
 			&.selected {
 				background-color: var(--primary);
 			}
-		}
-
-		.tab-filler {
-			width: 100%;
-			border-bottom: 1px solid var(--secondary);
 		}
 	}
 
@@ -304,15 +473,26 @@
 		line-height: 1.5rem;
 		font-family: 'Roboto Mono', monospace;
 		color: var(--semi-white);
+		padding: 0.5rem;
+
+		overflow-y: scroll;
+		border-top: 1px solid var(--primary);
+		border-left: 0;
+		box-sizing: border-box;
+		height: calc(100% - 2rem - 2px);
 	}
 	.code {
+		display: block; /* Forces it to take up the full available width */
+		width: 100%;
 		font-family: inherit;
 		color: inherit;
+
+		text-align: left;
 	}
 	.output {
 		grid-area: output;
 		background: var(--black);
-		padding: 1rem;
+		border-right: 1px solid var(--primary);
 	}
 
 	.pages {
@@ -372,7 +552,6 @@
 		background: var(--secondary);
 
 		border-right: 1px solid var(--primary);
-		border-top: 1px solid var(--secondary);
 	}
 
 	.header {

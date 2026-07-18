@@ -80,14 +80,21 @@
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let sentToRust = $state<any>({});
-
-	let resolvedRequest1 = $state<Request | null>(null);
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let resolvedHigherOrder = $state<any>({});
+	let resolvedLowerOrder = $state<Request | null>(null);
 	let response = $state('');
 
 	let tabs = ['Content', 'Options'];
-	let outputTabs = ['Response', 'Raw request', 'Resolved request', 'Second Resolved Request'];
+	let outputTabs = [
+		'Response',
+		'Sent to Rust',
+		'Raw request',
+		'LowerOrder result',
+		'HigherOrder result'
+	];
 	let currentTab = $state(tabs[0]);
-	let currentOutputTab = $state(outputTabs[1]);
+	let currentOutputTab = $state(outputTabs[0]);
 	let methodValue = $state('0');
 	let methodOption = $derived(typeOptions.find((opt) => opt.value === methodValue));
 
@@ -96,11 +103,13 @@
 			case outputTabs[0]:
 				return JSON.stringify(response, null, 2).trim();
 			case outputTabs[1]:
-				return JSON.stringify(rawRequest, null, 2).trim();
-			case outputTabs[2]:
 				return JSON.stringify(sentToRust, null, 2);
-			default:
-				return JSON.stringify(resolvedRequest1, null, 2);
+			case outputTabs[2]:
+				return JSON.stringify(rawRequest, null, 2).trim();
+			case outputTabs[3]:
+				return JSON.stringify(resolvedLowerOrder, null, 2);
+			case outputTabs[4]:
+				return JSON.stringify(resolvedHigherOrder, null, 2);
 		}
 	});
 
@@ -110,9 +119,7 @@
 
 	$effect(() => {
 		if (rawRequest) {
-			resolveRequest(formatToRequest(rawRequest)).then((req) => {
-				resolvedRequest1 = req;
-			});
+			resolveRequest(formatToRequest(rawRequest)).then();
 		}
 	});
 
@@ -169,6 +176,8 @@
 			]);
 		}
 
+		resolvedLowerOrder = { ...resolvedRequest };
+
 		if (options.containsHigherOrder) {
 			options.skipHigherOrder = false;
 			ctx.resolvedLowerOrderRequest = JSON.stringify(resolvedRequest);
@@ -194,6 +203,7 @@
 			}
 		}
 
+		resolvedHigherOrder = { ...resolvedRequest };
 		return resolvedRequest;
 	}
 
@@ -301,11 +311,43 @@
 		);
 		console.log('saved');
 	}
+	let leftWidth = $state(50); // Using Svelte 5 rune for reactivity
+
+    let isDragging = $state(false);
+
+    let containerEl = $state<HTMLElement | null>(null);
+	function startDragging() {
+		isDragging = true;
+	}
+
+	function onPointerMove(e) {
+		if (!isDragging || !containerEl) return;
+
+		// 1. Get the container's position on the screen
+		const rect = containerEl.getBoundingClientRect();
+
+		// 2. Calculate mouse position RELATIVE to the container
+		const x = e.clientX - rect.left;
+
+		// 3. Calculate percentage based on container width
+		const newLeftWidth = (x / rect.width) * 100;
+
+		// 4. Constrain between 10% and 90%
+		if (newLeftWidth > 10 && newLeftWidth < 90) {
+			leftWidth = newLeftWidth;
+		}
+	}
+
+	function stopDragging() {
+		isDragging = false;
+	}
 
 	onMount(async () => {
 		load(page.id);
 	});
 </script>
+
+<svelte:window onpointermove={onPointerMove} onpointerup={stopDragging} />
 
 <div class="container">
 	<div class="side">
@@ -347,39 +389,46 @@
 			onclick={send}
 		/>
 	</div>
-	<div class="main">
-		<div id="this" class="tabs">
-			{#each tabs as tab (tab)}
-				<button class="tab" class:selected={currentTab === tab} onclick={() => selectTab(tab)}>
-					{tab}
-				</button>
-			{/each}
-			<!-- <div class="tab-filler"></div> -->
-		</div>
-		{#if currentTab === 'Options'}
-			<div class="options-list">
-				<Toggle bind:checked={rawRequest.acceptInvalidCerts} label="Accept Invalid Certificates" />
-			</div>
-		{/if}
-		{#if currentTab === 'Content'}
-			<KeyValueList label="Headers" bind:rows={rawRequest.headers} />
-			<KeyValueList label="Body" bind:rows={rawRequest.body} />
-		{/if}
-	</div>
 
-	<div class="output">
-		<ol class="output-list">
-			{#each outputTabs as tab (tab)}
-				<button
-					class="output-tab"
-					class:selected={currentOutputTab === tab}
-					onclick={() => (currentOutputTab = tab)}
-				>
-					{tab}
-				</button>
-			{/each}
-		</ol>
-		<pre class="pre"><code class="code">{outputContent}</code></pre>
+	<div class="main" bind:this={containerEl}>
+		<div class="values" style="flex: {leftWidth}%">
+			<div id="this" class="tabs">
+				{#each tabs as tab (tab)}
+					<button class="tab" class:selected={currentTab === tab} onclick={() => selectTab(tab)}>
+						{tab}
+					</button>
+				{/each}
+				<!-- <div class="tab-filler"></div> -->
+			</div>
+			{#if currentTab === 'Options'}
+				<div class="options-list">
+					<Toggle
+						bind:checked={rawRequest.acceptInvalidCerts}
+						label="Accept Invalid Certificates"
+					/>
+				</div>
+			{/if}
+			{#if currentTab === 'Content'}
+				<KeyValueList label="Headers" bind:rows={rawRequest.headers} />
+				<KeyValueList label="Body" bind:rows={rawRequest.body} />
+			{/if}
+		</div>
+		<div class="handle" onpointerdown={startDragging}></div>
+
+		<div class="output" style="flex: {100 - leftWidth}%">
+			<ol class="output-list">
+				{#each outputTabs as tab (tab)}
+					<button
+						class="output-tab"
+						class:selected={currentOutputTab === tab}
+						onclick={() => (currentOutputTab = tab)}
+					>
+						{tab}
+					</button>
+				{/each}
+			</ol>
+			<pre class="pre"><code class="code">{outputContent}</code></pre>
+		</div>
 	</div>
 </div>
 
@@ -466,6 +515,7 @@
 	}
 
 	.pre {
+		display: block; /* Forces it to take up the full available width */
 		margin: 0;
 		white-space: pre-wrap; /* Keeps tabs but wraps long strings naturally */
 		word-wrap: break-word;
@@ -475,24 +525,25 @@
 		color: var(--semi-white);
 		padding: 0.5rem;
 
-		overflow-y: scroll;
 		border-top: 1px solid var(--primary);
 		border-left: 0;
 		box-sizing: border-box;
-		height: calc(100% - 2rem - 2px);
+		min-width: 0;
+        min-height: 0;
+        height: calc(100vh - 8rem);
+		overflow-y: auto;
 	}
 	.code {
 		display: block; /* Forces it to take up the full available width */
 		width: 100%;
 		font-family: inherit;
 		color: inherit;
-
-		text-align: left;
 	}
 	.output {
 		grid-area: output;
 		background: var(--black);
 		border-right: 1px solid var(--primary);
+		min-width: 0;
 	}
 
 	.pages {
@@ -530,13 +581,15 @@
 	.container {
 		display: grid;
 		grid-template-rows: 3rem 3rem 1fr;
-		grid-template-columns: 4rem 1fr 1fr;
+		grid-template-columns: 4rem 1fr;
 		grid-template-areas:
-			'side pages pages'
-			'side header header'
-			'side main output';
+			'side pages'
+			'side header'
+			'side main';
 		width: 100%;
 		height: 100vh;
+        min-height: 0;
+		max-height: 100vh;
 		margin: 0;
 	}
 
@@ -545,13 +598,24 @@
 	}
 	.main {
 		grid-area: main;
+		display: flex;
 
+		width: calc(100vw - 4rem);
+		user-select: none;
+	}
+	.handle {
+		width: 2px;
+		cursor: col-resize;
+		background-color: var(--primary);
+		touch-action: none; /* Prevents browser scroll on touch */
+	}
+	.values {
 		display: flex;
 		flex-direction: column;
 
 		background: var(--secondary);
 
-		border-right: 1px solid var(--primary);
+		// border-right: 1px solid var(--primary);
 	}
 
 	.header {
